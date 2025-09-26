@@ -1,40 +1,33 @@
-from urllib.parse import urlencode, unquote
+from urllib.parse import urlencode
 
-from django.http import HttpResponse
 import stripe
-
-import posthog
-from allauth.account.views import SignupView
-import json
-
 from allauth.account.models import EmailAddress
-from django_q.tasks import async_task
 from allauth.account.utils import send_email_confirmation
+from allauth.account.views import SignupView
+from django.conf import settings
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.messages.views import SuccessMessageMixin
-from django.shortcuts import redirect
-from django.conf import settings
-from django.contrib import messages
-from django.urls import reverse, reverse_lazy
-from django.views.generic import TemplateView, UpdateView, ListView, DetailView
-from django.template.loader import render_to_string
-from django.utils.html import strip_tags
 from django.core.mail import EmailMultiAlternatives
-
+from django.http import HttpResponse
+from django.shortcuts import redirect
+from django.template.loader import render_to_string
+from django.urls import reverse, reverse_lazy
+from django.utils.html import strip_tags
+from django.views.generic import DetailView, ListView, TemplateView, UpdateView
+from django_q.tasks import async_task
 from djstripe import models as djstripe_models
-from core.choices import ProfileStates
 
-
-from core.forms import ProfileUpdateForm
-from core.models import Profile, BlogPost
-
+from core.forms import ProfileUpdateForm, SourceForm
+from core.models import BlogPost, Profile, Source
 from knowthyself.utils import get_knowthyself_logger
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
 
 logger = get_knowthyself_logger(__name__)
+
 
 class HomeView(TemplateView):
     template_name = "pages/home.html"
@@ -48,7 +41,6 @@ class HomeView(TemplateView):
             context["show_confetti"] = True
         elif payment_status == "failed":
             messages.error(self.request, "Something went wrong with the payment.")
-        
 
         if self.request.user.is_authenticated and settings.POSTHOG_API_KEY:
             user = self.request.user
@@ -61,7 +53,6 @@ class HomeView(TemplateView):
                 source_function="HomeView - get_context_data",
                 group="Create Posthog Alias",
             )
-        
 
         return context
 
@@ -96,9 +87,9 @@ class AccountSignupView(SignupView):
             source_function="AccountSignupView - form_valid",
             group="Track Event",
         )
-        
 
         return response
+
 
 class UserSettingsView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
     login_url = "account_login"
@@ -119,12 +110,37 @@ class UserSettingsView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
         context["email_verified"] = email_address.verified
         context["resend_confirmation_url"] = reverse("resend_confirmation")
         context["has_subscription"] = user.profile.has_product_or_subscription
-        
-
 
         return context
 
 
+class SourceUpdateView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+    login_url = "account_login"
+    model = Source
+    form_class = SourceForm
+    success_message = "Sources updated successfully"
+    success_url = reverse_lazy("sources")
+    template_name = "pages/sources.html"
+
+    def get_object(self):
+        source, created = Source.objects.get_or_create(profile=self.request.user.profile)
+        if created:
+            logger.info(
+                "Created new source for user",
+                profile_id=self.request.user.profile.id,
+                email=self.request.user.email,
+            )
+        return source
+
+    def form_valid(self, form):
+        logger.info(
+            "Source updated successfully",
+            profile_id=self.request.user.profile.id,
+            email=self.request.user.email,
+            personal_website=form.cleaned_data.get("personal_website"),
+            hacker_news_username=form.cleaned_data.get("hacker_news_username"),
+        )
+        return super().form_valid(form)
 
 
 @login_required
@@ -209,7 +225,6 @@ def create_customer_portal_session(request):
     return redirect(session.url, code=303)
 
 
-
 class BlogView(ListView):
     model = BlogPost
     template_name = "blog/blog_posts.html"
@@ -236,4 +251,3 @@ def test_mjml(request):
     email.send()
 
     return HttpResponse("Email sent")
-
