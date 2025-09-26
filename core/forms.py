@@ -1,7 +1,7 @@
 from allauth.account.forms import LoginForm, SignupForm
 from django import forms
 
-from core.models import Profile
+from core.models import Profile, Source
 from core.utils import DivErrorList
 
 
@@ -43,3 +43,13 @@ class ProfileUpdateForm(forms.ModelForm):
             user.save()
             profile.save()
         return profile
+
+
+class SourceForm(forms.ModelForm):
+    class Meta:
+        model = Source
+        fields = ["personal_website", "hacker_news_username"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.error_class = DivErrorList
